@@ -18,7 +18,6 @@ import urllib3
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# Configuration Constants
 MAX_PDF_SIZE = 50 * 1024 * 1024
 MAX_PDF_PAGES = 100
 MAX_TEXT_LENGTH = 500000
@@ -33,15 +32,14 @@ API_TIMEOUT = 60
 class TimeoutException(Exception):
     pass
 
-# Input Collection Module
 class UserInputCollector:
     @staticmethod
     def get_keywords():
-        print("Enter your keywords separated by slashes (/).")
-        print("Type 'END' when you're done.\n")
+        print("Enter keywords (separated by /):")
+        print("Type 'END' when done\n")
         keyword_list = []
         while True:
-            line = input("➤ Enter keywords (or 'END' to finish): ").strip()
+            line = input("➤ Keywords (or 'END'): ").strip()
             if line.upper() == "END":
                 break
             if line:
@@ -51,58 +49,70 @@ class UserInputCollector:
     @staticmethod
     def get_date():
         while True:
-            user_input = input("Please enter a date in YYYY-MM-DD format: ").strip()
+            user_input = input("Date (YYYY-MM-DD): ").strip()
             try:
                 return datetime.strptime(user_input, "%Y-%m-%d").date()
             except ValueError:
-                print("Invalid format. Please try again using YYYY-MM-DD (e.g. 2025-07-09).")
+                print("Invalid format. Try again.")
 
     @staticmethod
     def get_filetype():
         while True:
-            choice = input("Enter the file type for your search (PDF or URL): ").strip().upper()
+            choice = input("File type (PDF/URL): ").strip().upper()
             if choice in ("PDF", "URL"):
                 return choice
-            print("Invalid choice. Please enter either 'PDF' or 'URL'.")
+            print("Enter PDF or URL")
 
     @staticmethod
     def get_country_code():
-        reference_url = "https://serpapi.com/google-countries"
-        prompt = (
-            f"Enter the 2-letter Google country code for your search (e.g. 'fr', 'us', 'gb').\n"
-            f"If you don't know the code, visit: {reference_url}\n➤ "
-        )
         while True:
-            code = input(prompt).strip().lower()
+            code = input("Country code (2 letters, e.g. 'us', 'gb', 'fr'): ").strip().lower()
             if len(code) == 2 and code.isalpha():
                 return code
-            print("Invalid code. It must be exactly two letters (e.g. 'fr'). Try again.\n")
+            print("Must be 2 letters")
 
     @staticmethod
     def get_num_results():
         while True:
-            num = input("Enter number of results (1-100): ").strip()
+            num = input("Number of results (1-100): ").strip()
             try:
                 num = int(num)
                 if 1 <= num <= 100:
                     return num
-                print("Number must be between 1-100.")
+                print("Must be 1-100")
             except ValueError:
-                print("Invalid number. Try again.")
+                print("Invalid number")
 
     @staticmethod
     def get_num_pages():
         while True:
-            pages = input("Enter number of pages to search (1–50): ").strip()
+            pages = input("Pages to search (1-50): ").strip()
             try:
                 pages = int(pages)
                 if 1 <= pages <= 50:
                     return pages
-                print("Please enter a number between 1 and 50.")
+                print("Must be 1-50")
             except ValueError:
-                print("Invalid input. Please enter a valid number.")
+                print("Invalid number")
+    
+    @staticmethod
+    def get_company_info():
+        print("\nCompany information:")
+        company_name = input("Company name: ").strip()
+        print("Description (Enter on empty line when done):")
+        
+        lines = []
+        while True:
+            line = input()
+            if not line.strip():
+                if lines:
+                    break
+                continue
+            lines.append(line)
+        
+        company_desc = "\n".join(lines).strip()
+        return company_name, company_desc
 
-# Timeout Handler Module
 class TimeoutHandler:
     @staticmethod
     def run_with_timeout(func, timeout_seconds, *args, **kwargs):
@@ -121,41 +131,38 @@ class TimeoutHandler:
         thread.join(timeout_seconds)
         
         if thread.is_alive():
-            raise TimeoutException(f"Operation timed out after {timeout_seconds} seconds")
+            raise TimeoutException(f"Timeout after {timeout_seconds}s")
         
         if exception[0]:
             raise exception[0]
         
         return result[0]
 
-# Content Extraction Module
 class ContentExtractor:
     @staticmethod
     def extract_from_pdf(url):
         try:
-            print(f"Downloading PDF from: {url}")
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-            }
+            print(f"Downloading PDF: {url}")
+            headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
             
             resp = requests.get(url, timeout=45, headers=headers, stream=True, verify=False)
             if resp.status_code != 200:
-                print(f"Could not download PDF: status code {resp.status_code}")
+                print(f"Download failed: {resp.status_code}")
                 return ""
             
             content_type = resp.headers.get('content-type', '').lower()
             if 'pdf' not in content_type and not url.lower().endswith('.pdf'):
-                print(f"Content type is not PDF: {content_type}")
+                print(f"Not PDF: {content_type}")
                 return ""
             
             pdf_bytes = resp.content
             
             if not pdf_bytes.startswith(b'%PDF'):
-                print("Downloaded file is not a valid PDF")
+                print("Invalid PDF")
                 return ""
                 
             if len(pdf_bytes) > MAX_PDF_SIZE:
-                print(f"PDF too large (>{MAX_PDF_SIZE // (1024*1024)}MB), skipping")
+                print(f"PDF too large")
                 return ""
                 
             with pdfplumber.open(BytesIO(pdf_bytes)) as pdf:
@@ -164,7 +171,7 @@ class ContentExtractor:
                 
                 for i, page in enumerate(pdf.pages[:max_pages]):
                     if i > 0 and i % 10 == 0:
-                        print(f"Processing page {i+1}/{max_pages}")
+                        print(f"Page {i+1}/{max_pages}")
                     
                     page_text = page.extract_text()
                     if page_text:
@@ -172,29 +179,27 @@ class ContentExtractor:
                         
                     current_text = "\n".join(texts)
                     if len(current_text) > MAX_TEXT_LENGTH:
-                        print("Reached text limit, stopping page processing")
+                        print("Text limit reached")
                         break
             
             text = "\n".join(texts).strip()
             
             if text:
                 actual_length = len(text.replace('\n', '').replace(' ', ''))
-                print(f"Successfully extracted text from PDF - Total: {len(text)} chars, Non-whitespace: {actual_length} chars")
-                if actual_length < 100:
-                    print("Warning: Extracted text has very little actual content")
+                print(f"Extracted: {len(text)} chars")
                 return text[:MAX_TEXT_LENGTH]
             
-            print("No text found with pdfplumber")
+            print("No text found")
             return ""
                 
         except Exception as e:
-            print(f"PDF extraction failed: {e}")
+            print(f"PDF error: {e}")
             return ""
 
     @staticmethod
     async def extract_fallback(url):
         try:
-            print(f"Fallback extraction for: {url}")
+            print(f"Using fallback for: {url}")
             
             headers = {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
@@ -208,17 +213,17 @@ class ContentExtractor:
             async with aiohttp.ClientSession(connector=connector, timeout=timeout, headers=headers) as session:
                 async with session.get(url) as response:
                     if response.status != 200:
-                        print(f"Fallback failed: status {response.status}")
+                        print(f"Status {response.status}")
                         return ""
                     
                     content_type = response.headers.get('content-type', '').lower()
                     if 'text/html' not in content_type:
-                        print(f"Not HTML content: {content_type}")
+                        print(f"Not HTML: {content_type}")
                         return ""
                     
                     content = await response.read()
                     if len(content) > MAX_URL_CONTENT_SIZE:
-                        print("Content too large for fallback processing")
+                        print("Content too large")
                         return ""
                     
                     soup = BeautifulSoup(content, 'html.parser')
@@ -229,13 +234,13 @@ class ContentExtractor:
                     text = soup.get_text(separator='\n', strip=True)
                     
                     if text and len(text.strip()) > 50:
-                        print(f"Fallback extraction successful ({len(text)} characters)")
+                        print(f"Extracted {len(text)} chars")
                         return text[:300000]
                     
                     return ""
                     
         except Exception as e:
-            print(f"Fallback extraction failed: {e}")
+            print(f"Fallback error: {e}")
             return ""
 
     @staticmethod
@@ -254,7 +259,7 @@ class ContentExtractor:
             await crawler.start()
             yield crawler
         except Exception as e:
-            print(f"Failed to start crawler: {e}")
+            print(f"Crawler init failed: {e}")
             yield None
         finally:
             if crawler:
@@ -266,11 +271,11 @@ class ContentExtractor:
     @staticmethod
     async def extract_from_url(url):
         try:
-            print(f"Crawling URL: {url}")
+            print(f"Crawling: {url}")
             
             async with ContentExtractor.get_crawler() as crawler:
                 if crawler is None:
-                    print("Crawler initialization failed, trying fallback")
+                    print("Using fallback")
                     return await ContentExtractor.extract_fallback(url)
                 
                 try:
@@ -288,27 +293,26 @@ class ContentExtractor:
                     
                     if text and len(text.strip()) > 50:
                         if len(text) > 800000:
-                            print(f"Large content detected ({len(text)} chars), truncating...")
-                            text = text[:800000] + "\n[Content truncated due to size]"
+                            print(f"Truncating ({len(text)} chars)")
+                            text = text[:800000]
                         
-                        print(f"Successfully crawled URL ({len(text)} characters)")
+                        print(f"Crawled {len(text)} chars")
                         return text
                     else:
-                        print("No meaningful content from crawler, trying fallback")
+                        print("No content, trying fallback")
                         return await ContentExtractor.extract_fallback(url)
                         
                 except asyncio.TimeoutError:
-                    print("Crawler timeout, trying fallback method")
+                    print("Timeout, trying fallback")
                     return await ContentExtractor.extract_fallback(url)
                 except Exception as e:
-                    print(f"Crawler error: {str(e)[:200]}... trying fallback")
+                    print(f"Error, trying fallback")
                     return await ContentExtractor.extract_fallback(url)
                     
         except Exception as e:
-            print(f"URL extraction completely failed for {url}: {e}")
+            print(f"Extraction failed: {e}")
             return ""
 
-# AI Analysis Module
 class AIAnalyzer:
     def __init__(self, api_key):
         self.api_key = api_key
@@ -317,22 +321,17 @@ class AIAnalyzer:
     def build_prompt(self, company, desc, rfp_content):
         truncated_content = rfp_content[:6000] if len(rfp_content) > 6000 else rfp_content
         
-        return f"""
-[ROLE]
-You are an expert in RFP analysis for SaaS and fintech companies.
+        return f"""Analyze this RFP for {company}.
 
-[COMPANY INFO]
-{company}
+Company: {company}
+Description: {desc[:10000]}
 
-{desc[:10000]}
-
-[RFP TEXT]
+RFP Content:
 {truncated_content}
 
-Analyze this RFP for {company}.
-Is this RFP specifically targeting our solution? Respond in this exact format:
-Answer: Yes/No  
-Reason: [1-2 sentences referencing explicit matches/mismatches from the RFP text]
+Is this RFP relevant for our company?
+Answer: Yes/No
+Reason: [2 sentences]
 """
 
     def query_api(self, prompt):
@@ -342,7 +341,7 @@ Reason: [1-2 sentences referencing explicit matches/mismatches from the RFP text
         }
         
         if len(prompt) > 20000:
-            prompt = prompt[:20000] + "\n[Content truncated for AI processing]"
+            prompt = prompt[:20000]
         
         data = {
             "model": "deepseek-chat",
@@ -354,11 +353,11 @@ Reason: [1-2 sentences referencing explicit matches/mismatches from the RFP text
         
         for attempt in range(API_RETRY_ATTEMPTS):
             try:
-                print(f"Making DeepSeek API request (attempt {attempt + 1}/{API_RETRY_ATTEMPTS})")
+                print(f"API request ({attempt + 1}/{API_RETRY_ATTEMPTS})")
                 response = requests.post(self.url, headers=headers, json=data, timeout=API_TIMEOUT)
                           
                 if response.status_code == 401:
-                    return "API Error: Invalid API key. Please check your DeepSeek API key."
+                    return "API Error: Invalid key"
                 
                 response.raise_for_status()
                 result = response.json()
@@ -368,34 +367,26 @@ Reason: [1-2 sentences referencing explicit matches/mismatches from the RFP text
                     
                     if 'usage' in result:
                         usage = result['usage']
-                        print(f"Tokens used - Input: {usage.get('prompt_tokens', 0)}, Output: {usage.get('completion_tokens', 0)}")
+                        print(f"Tokens: {usage.get('prompt_tokens', 0)} / {usage.get('completion_tokens', 0)}")
                     
                     return content
                 else:
-                    print(f"Unexpected API response: {result}")
-                    return "API Error: Unexpected response structure"
+                    return "API Error: Bad response"
                     
             except requests.exceptions.Timeout:
-                print(f"API timeout (attempt {attempt + 1})")
                 if attempt == API_RETRY_ATTEMPTS - 1:
-                    return "API Error: Request timed out"
-                time.sleep(3)
-            except requests.exceptions.RequestException as e:
-                print(f"DeepSeek API error: {e}")
-                if attempt == API_RETRY_ATTEMPTS - 1:
-                    return f"API Error: {str(e)}"
+                    return "API Error: Timeout"
                 time.sleep(3)
             except Exception as e:
-                print(f"Unexpected error: {e}")
                 if attempt == API_RETRY_ATTEMPTS - 1:
                     return f"API Error: {str(e)}"
                 time.sleep(3)
         
-        return "API Error: All attempts failed"
+        return "API Error: Failed"
 
     def analyze_rfp(self, row, company_name, company_desc, worker_id):
         title, link, snippet, date, full_content, kw = row
-        print(f"[Worker {worker_id}] Analyzing: {title[:50]}...")
+        print(f"[{worker_id}] {title[:50]}...")
         
         if worker_id > 0:
             time.sleep(1)
@@ -419,7 +410,6 @@ Reason: [1-2 sentences referencing explicit matches/mismatches from the RFP text
             }
             
         except TimeoutException:
-            print(f"AI analysis timeout for: {title[:30]}...")
             return {
                 "keyword": kw,
                 "title": title,
@@ -427,11 +417,10 @@ Reason: [1-2 sentences referencing explicit matches/mismatches from the RFP text
                 "snippet": snippet,
                 "date": date,
                 "full_content": full_content[:2000],
-                "ai_answer": "AI analysis timed out",
+                "ai_answer": "Timeout",
                 "ai_status": "Timeout"
             }
         except Exception as e:
-            print(f"AI worker error: {e}")
             return {
                 "keyword": kw,
                 "title": title,
@@ -439,11 +428,10 @@ Reason: [1-2 sentences referencing explicit matches/mismatches from the RFP text
                 "snippet": snippet,
                 "date": date,
                 "full_content": full_content[:2000],
-                "ai_answer": f"AI error: {str(e)}",
+                "ai_answer": f"Error: {str(e)}",
                 "ai_status": "Error"
             }
 
-# Batch Processing Module
 class BatchProcessor:
     @staticmethod
     async def extract_items(items):
@@ -453,8 +441,8 @@ class BatchProcessor:
         async def extract_single_item(item_data, item_index):
             title, link, snippet, date, kw = item_data
             try:
-                print(f"\n[{item_index+1}/{len(items)}] Extracting: {title[:60]}...")
-                print(f"   Link: {link}")
+                print(f"\n[{item_index+1}/{len(items)}] {title[:60]}")
+                print(f"   {link}")
                 
                 if link.lower().endswith(".pdf"):
                     loop = asyncio.get_event_loop()
@@ -472,38 +460,32 @@ class BatchProcessor:
                     stripped_content = content.strip()
                     actual_content = stripped_content.replace('\n', '').replace(' ', '')
                     
-                    print(f"   Raw content length: {len(content)} chars")
-                    print(f"   Stripped content length: {len(stripped_content)} chars")
-                    print(f"   Non-whitespace content: {len(actual_content)} chars")
+                    print(f"   Content: {len(actual_content)} chars")
                     
                     if len(actual_content) > 100:
-                        print(f"   Content validated! Adding to results.")
+                        print(f"   ✓ Added")
                         return (title, link, snippet, date, stripped_content, kw)
                     else:
-                        print(f"   Content too short after stripping whitespace")
-                        failed_extractions.append((title, link, f"Content too short ({len(actual_content)} chars)"))
+                        failed_extractions.append((title, link, f"Too short ({len(actual_content)})"))
                         return None
                 else:
-                    print(f"   No content extracted")
-                    failed_extractions.append((title, link, "No content extracted"))
+                    failed_extractions.append((title, link, "No content"))
                     return None
                     
             except asyncio.TimeoutError:
-                print(f"   Timeout for individual extraction")
-                failed_extractions.append((title, link, "Extraction timeout"))
+                failed_extractions.append((title, link, "Timeout"))
                 return None
             except Exception as e:
-                print(f"   Error: {str(e)[:100]}")
-                failed_extractions.append((title, link, f"Error: {str(e)[:50]}"))
+                failed_extractions.append((title, link, str(e)[:50]))
                 return None
         
-        print(f"\nStarting extraction of {len(items)} items in batches of {BATCH_SIZE}...")
+        print(f"\nExtracting {len(items)} items (batch size {BATCH_SIZE})...")
         
         for batch_start in range(0, len(items), BATCH_SIZE):
             batch_end = min(batch_start + BATCH_SIZE, len(items))
             batch_items = items[batch_start:batch_end]
             
-            print(f"\nProcessing batch {batch_start//BATCH_SIZE + 1}/{(len(items) + BATCH_SIZE - 1)//BATCH_SIZE}")
+            print(f"\nBatch {batch_start//BATCH_SIZE + 1}/{(len(items) + BATCH_SIZE - 1)//BATCH_SIZE}")
             
             tasks = []
             for i, item in enumerate(batch_items):
@@ -516,38 +498,36 @@ class BatchProcessor:
                 
                 for result in batch_results:
                     if isinstance(result, Exception):
-                        print(f"Task failed with exception: {result}")
+                        print(f"Exception: {result}")
                     elif result is not None:
                         extracted.append(result)
                 
                 batch_extracted = len([r for r in batch_results if r is not None and not isinstance(r, Exception)])
-                print(f"Batch complete. Extracted {batch_extracted} items from this batch")
+                print(f"Batch done: {batch_extracted}/{len(batch_items)}")
                 
             except Exception as e:
-                print(f"Batch processing error: {e}")
+                print(f"Batch error: {e}")
         
-        print(f"\nFinal Extraction Summary:")
-        print(f"   Total items attempted: {len(items)}")
-        print(f"   Successfully extracted: {len(extracted)}")
-        print(f"   Failed extractions: {len(failed_extractions)}")
+        print(f"\nExtraction complete:")
+        print(f"   Success: {len(extracted)}")
+        print(f"   Failed: {len(failed_extractions)}")
         
         if failed_extractions:
-            print(f"\nFailed items:")
+            print(f"\nFailed:")
             for title, link, reason in failed_extractions[:10]:
-                print(f"   - {title[:50]}... ({reason})")
+                print(f"   {title[:50]}... ({reason})")
             if len(failed_extractions) > 10:
-                print(f"   ... and {len(failed_extractions) - 10} more")
+                print(f"   ...and {len(failed_extractions) - 10} more")
         
         return extracted, failed_extractions
 
-# Search Module
 class SearchEngine:
     def __init__(self, api_key):
         self.api_key = api_key
         self.headers = {"X-API-KEY": api_key}
 
     def search_keyword(self, keyword, filetype, start_date, country, num_results, num_pages):
-        print(f"\nSearching for keyword: '{keyword}'")
+        print(f"\nSearching: '{keyword}'")
         
         q = f"{keyword} filetype:{filetype.lower()}" if filetype == "PDF" else keyword
         q += f" after:{start_date}"
@@ -563,13 +543,13 @@ class SearchEngine:
             response.raise_for_status()
             return response.json()
         except Exception as e:
-            print(f"Search failed for '{keyword}': {str(e)[:200]}")
+            print(f"Search failed: {str(e)[:100]}")
             return None
 
     def filter_results(self, results, filetype):
         items = []
         organic_results = results.get("organic", [])
-        print(f"Found {len(organic_results)} organic results")
+        print(f"Found {len(organic_results)} results")
         
         for item in organic_results:
             title = item.get("title", "")
@@ -584,15 +564,14 @@ class SearchEngine:
 
             items.append((title, link, snippet, date))
 
-        print(f"Filtered to {len(items)} relevant items")
+        print(f"Filtered: {len(items)}")
         return items
 
-# Report Generator Module
 class ReportGenerator:
     @staticmethod
     def save_results(all_results, all_failed_extractions):
         if not all_results and not all_failed_extractions:
-            print("No data extracted to save.")
+            print("No data to save")
             return ReportGenerator._save_empty_file()
         
         try:
@@ -610,8 +589,8 @@ class ReportGenerator:
                         'link': link,
                         'snippet': '',
                         'date': '',
-                        'full_content': f'EXTRACTION FAILED: {reason}',
-                        'ai_answer': 'N/A - Extraction Failed',
+                        'full_content': f'FAILED: {reason}',
+                        'ai_answer': 'N/A',
                         'ai_status': 'Failed Extraction'
                     })
                 
@@ -661,13 +640,16 @@ class ReportGenerator:
                         max_len = max(failed_df[col].astype(str).map(len).max(), len(col))
                         failed_worksheet.set_column(i, i, min(80, max(15, max_len)))
             
-            print(f"Saved {len(df)} total rows to {filename}")
+            print(f"Saved {len(df)} rows to {filename}")
             
             ReportGenerator._print_summary(df, all_results, all_failed_extractions)
             
+            return filename
+            
         except Exception as e:
-            print(f"Error saving results: {e}")
+            print(f"Save error: {e}")
             ReportGenerator._save_csv_fallback(all_results)
+            return None
 
     @staticmethod
     def _print_summary(df, all_results, all_failed_extractions):
@@ -675,12 +657,12 @@ class ReportGenerator:
         yes_count = sum(1 for _, row in df.iterrows() if 'Answer: Yes' in str(row.get('ai_answer', '')) and row.get('ai_status') == 'Success')
         
         print(f"\nSummary:")
-        print(f"- Total rows in Excel: {len(df)}")
-        print(f"- Successful extractions: {len(all_results)}")
-        print(f"- Failed extractions: {len(all_failed_extractions)}")
-        print(f"- AI analysis successful: {success_count}")
-        print(f"- AI analysis failed: {len(all_results) - success_count if all_results else 0}")
-        print(f"- Potential matches (Yes): {yes_count}")
+        print(f"  Total: {len(df)}")
+        print(f"  Extracted: {len(all_results)}")
+        print(f"  Failed extraction: {len(all_failed_extractions)}")
+        print(f"  AI success: {success_count}")
+        print(f"  AI failed: {len(all_results) - success_count if all_results else 0}")
+        print(f"  Matches: {yes_count}")
 
     @staticmethod
     def _save_csv_fallback(all_results):
@@ -688,33 +670,34 @@ class ReportGenerator:
             df = pd.DataFrame(all_results) if all_results else pd.DataFrame()
             csv_filename = f'rfp_analysis_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv'
             df.to_csv(csv_filename, index=False)
-            print(f"Saved results as CSV fallback: {csv_filename}")
+            print(f"Saved CSV: {csv_filename}")
         except:
-            print("Could not save results in any format")
+            print("Could not save")
 
     @staticmethod
     def _save_empty_file():
         try:
             metadata = {
                 "keyword": ["No results"],
-                "title": ["No results found"],
+                "title": ["No results"],
                 "link": [""],
                 "snippet": [""],
                 "date": [""],
-                "full_content": ["No content extracted"],
-                "ai_answer": ["No analysis performed"],
+                "full_content": [""],
+                "ai_answer": [""],
                 "ai_status": ["N/A"]
             }
             df = pd.DataFrame(metadata)
             filename = f'rfp_analysis_empty_{datetime.now().strftime("%Y%m%d_%H%M%S")}.xlsx'
             df.to_excel(filename, index=False)
-            print(f"Saved empty results file: {filename}")
+            print(f"Empty file: {filename}")
+            return filename
         except Exception as e:
-            print(f"Could not save empty results file: {e}")
+            print(f"Save error: {e}")
+            return None
 
-# Main Application
 def main():
-    print("RFP Analysis Tool with DeepSeek AI\n")
+    print("RFP Analysis Tool\n")
     
     load_dotenv()
     
@@ -722,30 +705,146 @@ def main():
     serper_api_key = os.getenv("SERPER_API_KEY")
     
     if not deepseek_api_key:
-        print("DEEPSEEK_API_KEY not found in .env file")
-        print("To get your DeepSeek API key:")
-        print("   1. Go to https://platform.deepseek.com")
-        print("   2. Sign up / Log in")
-        print("   3. Create an API key")
-        print("   4. Add to your .env file: DEEPSEEK_API_KEY=sk-xxxxx")
+        print("DEEPSEEK_API_KEY not in .env")
         return
     
     if not serper_api_key:
-        print("SERPER_API_KEY not found in .env file")
+        print("SERPER_API_KEY not in .env")
         return
     
     collector = UserInputCollector()
+    
     keywords = collector.get_keywords()
+    if not keywords:
+        print("No keywords")
+        return
+        
     start_date = collector.get_date()
     filetype = collector.get_filetype()
     country = collector.get_country_code()
     num_results = collector.get_num_results()
     num_pages = collector.get_num_pages()
+    company_name, company_desc = collector.get_company_info()
     
-    print(f"\nSearch Configuration:")
+    print(f"\n{'='*60}")
+    print(f"Configuration:")
+    print(f"{'='*60}")
     print(f"Keywords: {keywords}")
-    print(f"Start date: {start_date}")
-    print(f"File type: {filetype}")
+    print(f"Date: {start_date}")
+    print(f"Type: {filetype}")
     print(f"Country: {country}")
-    print(f"Results per keyword: {num_results}")
-    print(f"Number of pages: {num_pages}")
+    print(f"Results: {num_results}")
+    print(f"Pages: {num_pages}")
+    print(f"Company: {company_name}")
+    print(f"{'='*60}\n")
+    
+    search_engine = SearchEngine(serper_api_key)
+    
+    all_items = []
+    for keyword in keywords:
+        results = search_engine.search_keyword(keyword, filetype, start_date, country, num_results, num_pages)
+        
+        if results:
+            items = search_engine.filter_results(results, filetype)
+            items_with_kw = [(title, link, snippet, date, keyword) for title, link, snippet, date in items]
+            all_items.extend(items_with_kw)
+        else:
+            print(f"No results for: {keyword}")
+    
+    if not all_items:
+        print("\nNo results")
+        ReportGenerator._save_empty_file()
+        return
+    
+    print(f"\n{'='*60}")
+    print(f"Items to process: {len(all_items)}")
+    print(f"{'='*60}\n")
+    
+    print("Extracting content...")
+    try:
+        if os.name == 'nt':
+            asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+        
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            extracted_items, failed_extractions = loop.run_until_complete(
+                BatchProcessor.extract_items(all_items)
+            )
+        finally:
+            loop.close()
+    except Exception as e:
+        print(f"Extraction error: {e}")
+        import traceback
+        traceback.print_exc()
+        extracted_items = []
+        failed_extractions = []
+    
+    if not extracted_items:
+        print("\nNo content extracted")
+        ReportGenerator.save_results([], failed_extractions)
+        return
+    
+    print(f"\n{'='*60}")
+    print(f"Extracted: {len(extracted_items)}")
+    print(f"{'='*60}\n")
+    
+    print("Running AI analysis...")
+    analyzer = AIAnalyzer(deepseek_api_key)
+    all_results = []
+    
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        futures = {
+            executor.submit(analyzer.analyze_rfp, item, company_name, company_desc, i): item
+            for i, item in enumerate(extracted_items)
+        }
+        
+        for future in as_completed(futures):
+            try:
+                result = future.result(timeout=180)
+                all_results.append(result)
+                print(f"Done: {len(all_results)}/{len(extracted_items)}")
+            except FutureTimeoutError:
+                item = futures[future]
+                all_results.append({
+                    "keyword": item[5],
+                    "title": item[0],
+                    "link": item[1],
+                    "snippet": item[2],
+                    "date": item[3],
+                    "full_content": item[4][:2000],
+                    "ai_answer": "Timeout",
+                    "ai_status": "Timeout"
+                })
+            except Exception as e:
+                item = futures[future]
+                all_results.append({
+                    "keyword": item[5],
+                    "title": item[0],
+                    "link": item[1],
+                    "snippet": item[2],
+                    "date": item[3],
+                    "full_content": item[4][:2000],
+                    "ai_answer": f"Error: {str(e)}",
+                    "ai_status": "Error"
+                })
+    
+    print("\nSaving...")
+    filename = ReportGenerator.save_results(all_results, failed_extractions)
+    
+    if filename:
+        print(f"\n{'='*60}")
+        print(f"Complete: {filename}")
+        print(f"{'='*60}\n")
+    else:
+        print("\nSave failed")
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\n\nInterrupted")
+    except Exception as e:
+        print(f"\n\nError: {e}")
+        import traceback
+        traceback.print_exc()
