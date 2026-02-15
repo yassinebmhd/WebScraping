@@ -1,0 +1,9 @@
+aiohttp
+beautifulsoup4
+crawl4ai
+python-dotenv
+pandas
+pdfplumber
+requests
+urllib3
+xlsxwriter
