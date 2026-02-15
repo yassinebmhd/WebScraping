@@ -6,13 +6,10 @@ import pdfplumber
 from io import BytesIO
 from dotenv import load_dotenv
 import asyncio
-from crawl4ai import AsyncWebCrawler
 from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FutureTimeoutError
 import time
-from contextlib import asynccontextmanager
 from bs4 import BeautifulSoup
 import aiohttp
-import ssl
 import threading
 import urllib3
 
@@ -23,7 +20,6 @@ MAX_PDF_PAGES = 100
 MAX_TEXT_LENGTH = 500000
 MAX_URL_CONTENT_SIZE = 10 * 1024 * 1024
 BATCH_SIZE = 10
-CRAWLER_TIMEOUT = 45
 PDF_TIMEOUT = 120
 URL_TIMEOUT = 60
 API_RETRY_ATTEMPTS = 3
@@ -66,39 +62,27 @@ class UserInputCollector:
     @staticmethod
     def get_country_code():
         while True:
-            code = input("Country code (2 letters, e.g. 'us', 'gb', 'fr'): ").strip().lower()
+            code = input("Country code (2 letters, e.g. 'us', 'gb'): ").strip().lower()
             if len(code) == 2 and code.isalpha():
                 return code
             print("Must be 2 letters")
 
     @staticmethod
-    def get_num_results():
+    def get_desired_results():
         while True:
-            num = input("Number of results (1-100): ").strip()
+            num = input("Desired results per keyword (10-500): ").strip()
             try:
                 num = int(num)
-                if 1 <= num <= 100:
+                if 10 <= num <= 500:
                     return num
-                print("Must be 1-100")
-            except ValueError:
-                print("Invalid number")
-
-    @staticmethod
-    def get_num_pages():
-        while True:
-            pages = input("Pages to search (1-50): ").strip()
-            try:
-                pages = int(pages)
-                if 1 <= pages <= 50:
-                    return pages
-                print("Must be 1-50")
+                print("Must be 10-500")
             except ValueError:
                 print("Invalid number")
     
     @staticmethod
     def get_company_info():
-        print("\nCompany information:")
-        company_name = input("Company name: ").strip()
+        print("\nCompany info:")
+        company_name = input("Name: ").strip()
         print("Description (Enter on empty line when done):")
         
         lines = []
@@ -197,9 +181,9 @@ class ContentExtractor:
             return ""
 
     @staticmethod
-    async def extract_fallback(url):
+    async def extract_from_url(url):
         try:
-            print(f"Using fallback for: {url}")
+            print(f"Extracting: {url}")
             
             headers = {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
@@ -207,11 +191,11 @@ class ContentExtractor:
                 'Accept-Language': 'en-US,en;q=0.5',
             }
             
-            connector = aiohttp.TCPConnector(ssl=ssl.create_default_context())
-            timeout = aiohttp.ClientTimeout(total=30)
+            connector = aiohttp.TCPConnector(ssl=False, force_close=True)
+            timeout = aiohttp.ClientTimeout(total=30, connect=10)
             
             async with aiohttp.ClientSession(connector=connector, timeout=timeout, headers=headers) as session:
-                async with session.get(url) as response:
+                async with session.get(url, allow_redirects=True) as response:
                     if response.status != 200:
                         print(f"Status {response.status}")
                         return ""
@@ -222,95 +206,29 @@ class ContentExtractor:
                         return ""
                     
                     content = await response.read()
+                    
                     if len(content) > MAX_URL_CONTENT_SIZE:
-                        print("Content too large")
-                        return ""
+                        content = content[:MAX_URL_CONTENT_SIZE]
                     
                     soup = BeautifulSoup(content, 'html.parser')
                     
-                    for script in soup(["script", "style", "nav", "footer", "header"]):
-                        script.decompose()
+                    for element in soup(["script", "style", "nav", "footer", "header", "aside", "form"]):
+                        element.decompose()
                     
                     text = soup.get_text(separator='\n', strip=True)
                     
                     if text and len(text.strip()) > 50:
                         print(f"Extracted {len(text)} chars")
                         return text[:300000]
+                    else:
+                        print(f"Insufficient content")
+                        return ""
                     
-                    return ""
-                    
-        except Exception as e:
-            print(f"Fallback error: {e}")
+        except asyncio.TimeoutError:
+            print(f"Timeout")
             return ""
-
-    @staticmethod
-    @asynccontextmanager
-    async def get_crawler():
-        crawler = None
-        try:
-            crawler = AsyncWebCrawler(
-                headless=True,
-                verbose=False,
-                always_by_pass_cache=True,
-                browser_type="chromium",
-                page_timeout=30000,
-                request_timeout=30000,
-            )
-            await crawler.start()
-            yield crawler
         except Exception as e:
-            print(f"Crawler init failed: {e}")
-            yield None
-        finally:
-            if crawler:
-                try:
-                    await crawler.close()
-                except:
-                    pass
-
-    @staticmethod
-    async def extract_from_url(url):
-        try:
-            print(f"Crawling: {url}")
-            
-            async with ContentExtractor.get_crawler() as crawler:
-                if crawler is None:
-                    print("Using fallback")
-                    return await ContentExtractor.extract_fallback(url)
-                
-                try:
-                    result = await asyncio.wait_for(
-                        crawler.arun(url), 
-                        timeout=CRAWLER_TIMEOUT
-                    )
-                    
-                    if isinstance(result, dict):
-                        text = result.get("text", "")
-                    elif isinstance(result, list) and result:
-                        text = result[0].get("text", "")
-                    else:
-                        text = str(result)
-                    
-                    if text and len(text.strip()) > 50:
-                        if len(text) > 800000:
-                            print(f"Truncating ({len(text)} chars)")
-                            text = text[:800000]
-                        
-                        print(f"Crawled {len(text)} chars")
-                        return text
-                    else:
-                        print("No content, trying fallback")
-                        return await ContentExtractor.extract_fallback(url)
-                        
-                except asyncio.TimeoutError:
-                    print("Timeout, trying fallback")
-                    return await ContentExtractor.extract_fallback(url)
-                except Exception as e:
-                    print(f"Error, trying fallback")
-                    return await ContentExtractor.extract_fallback(url)
-                    
-        except Exception as e:
-            print(f"Extraction failed: {e}")
+            print(f"Error: {str(e)[:100]}")
             return ""
 
 class AIAnalyzer:
@@ -331,7 +249,7 @@ RFP Content:
 
 Is this RFP relevant for our company?
 Answer: Yes/No
-Reason: [2 sentences]
+Reason: [2 sentences max]
 """
 
     def query_api(self, prompt):
@@ -479,7 +397,7 @@ class BatchProcessor:
                 failed_extractions.append((title, link, str(e)[:50]))
                 return None
         
-        print(f"\nExtracting {len(items)} items (batch size {BATCH_SIZE})...")
+        print(f"\nExtracting {len(items)} items (batch {BATCH_SIZE})...")
         
         for batch_start in range(0, len(items), BATCH_SIZE):
             batch_end = min(batch_start + BATCH_SIZE, len(items))
@@ -503,7 +421,7 @@ class BatchProcessor:
                         extracted.append(result)
                 
                 batch_extracted = len([r for r in batch_results if r is not None and not isinstance(r, Exception)])
-                print(f"Batch done: {batch_extracted}/{len(batch_items)}")
+                print(f"Done: {batch_extracted}/{len(batch_items)}")
                 
             except Exception as e:
                 print(f"Batch error: {e}")
@@ -526,25 +444,50 @@ class SearchEngine:
         self.api_key = api_key
         self.headers = {"X-API-KEY": api_key}
 
-    def search_keyword(self, keyword, filetype, start_date, country, num_results, num_pages):
+    def search_keyword(self, keyword, filetype, start_date, country, desired_results):
         print(f"\nSearching: '{keyword}'")
         
-        q = f"{keyword} filetype:{filetype.lower()}" if filetype == "PDF" else keyword
-        q += f" after:{start_date}"
-        payload = {"q": q, "gl": country, "num": num_results, "page": num_pages}
+        results_per_page = 10
+        pages_needed = (desired_results + results_per_page - 1) // results_per_page
+        pages_needed = min(pages_needed, 50)
         
-        try:
-            response = requests.post(
-                "https://google.serper.dev/search",
-                json=payload, 
-                headers=self.headers, 
-                timeout=30
-            )
-            response.raise_for_status()
-            return response.json()
-        except Exception as e:
-            print(f"Search failed: {str(e)[:100]}")
-            return None
+        all_results = []
+        
+        for page in range(1, pages_needed + 1):
+            if len(all_results) >= desired_results:
+                break
+                
+            q = f"{keyword} filetype:{filetype.lower()}" if filetype == "PDF" else keyword
+            q += f" after:{start_date}"
+            payload = {"q": q, "gl": country, "page": page}
+            
+            try:
+                response = requests.post(
+                    "https://google.serper.dev/search",
+                    json=payload, 
+                    headers=self.headers, 
+                    timeout=30
+                )
+                response.raise_for_status()
+                result = response.json()
+                
+                organic = result.get("organic", [])
+                all_results.extend(organic)
+                
+                if not organic:
+                    break
+                    
+                time.sleep(0.5)
+                
+            except Exception as e:
+                print(f"Page {page} failed: {str(e)[:100]}")
+                continue
+        
+        all_results = all_results[:desired_results]
+        
+        if all_results:
+            return {"organic": all_results}
+        return None
 
     def filter_results(self, results, filetype):
         items = []
@@ -722,8 +665,7 @@ def main():
     start_date = collector.get_date()
     filetype = collector.get_filetype()
     country = collector.get_country_code()
-    num_results = collector.get_num_results()
-    num_pages = collector.get_num_pages()
+    desired_results = collector.get_desired_results()
     company_name, company_desc = collector.get_company_info()
     
     print(f"\n{'='*60}")
@@ -733,8 +675,7 @@ def main():
     print(f"Date: {start_date}")
     print(f"Type: {filetype}")
     print(f"Country: {country}")
-    print(f"Results: {num_results}")
-    print(f"Pages: {num_pages}")
+    print(f"Results per keyword: {desired_results}")
     print(f"Company: {company_name}")
     print(f"{'='*60}\n")
     
@@ -742,7 +683,7 @@ def main():
     
     all_items = []
     for keyword in keywords:
-        results = search_engine.search_keyword(keyword, filetype, start_date, country, num_results, num_pages)
+        results = search_engine.search_keyword(keyword, filetype, start_date, country, desired_results)
         
         if results:
             items = search_engine.filter_results(results, filetype)
